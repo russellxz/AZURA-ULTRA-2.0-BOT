@@ -481,7 +481,7 @@ case 'tourl': {
     const FormData = require('form-data');
     const axios = require('axios');
     const ffmpeg = require('fluent-ffmpeg');
-    const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+    const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
 
     const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
 
@@ -738,7 +738,7 @@ case 'tovideo': {
   const fs = require('fs');
   const path = require('path');
   const axios = require('axios');
-  const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+  const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
   const { spawn } = require('child_process');
   const FormData = require('form-data');
   const { promisify } = require('util');
@@ -882,7 +882,7 @@ case 'carga': {
 case 'whatmusic': {
     const fs = require('fs');
     const path = require('path');
-    const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+    const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
     const { promisify } = require('util');
     const { pipeline } = require('stream');
     const axios = require('axios');
@@ -1025,7 +1025,7 @@ case 'whatmusic6': {
     const FormData = require('form-data');
     const { promisify } = require('util');
     const { pipeline } = require('stream');
-    const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+    const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
     const yts = require('yt-search');
 
     const streamPipeline = promisify(pipeline);
@@ -1157,7 +1157,7 @@ case 'ff2': {
     const fs = require('fs');
     const path = require('path');
     const ffmpeg = require('fluent-ffmpeg');
-    const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+    const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
     const { promisify } = require('util');
     const { pipeline } = require('stream');
     const streamPipeline = promisify(pipeline);
@@ -1395,7 +1395,7 @@ case 'linia': {
     const fs = require('fs');
     const path = require('path');
     const ffmpeg = require('fluent-ffmpeg');
-    const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+    const { downloadContentFromMessage } = await import('@whiskeysockets/baileys');
     const { promisify } = require('util');
     const { pipeline } = require('stream');
     const streamPipeline = promisify(pipeline);

@@ -643,7 +643,7 @@ case 'tourl': {
 - AdoFiles: ${err2}`);
         }
 
-        let replyText = '✅ *Archivo subido exitosamente:*';
+        let replyText = '✅ *Archivo subido exitosamente:*\n';
 
         if (okRussell) {
             replyText += `*CDN Russell:*

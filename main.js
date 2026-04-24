@@ -295,7 +295,7 @@ Usa el comando:
 📂 *Lista de palabras clave guardadas:*  
 ━━━━━━━━━━━━━━━━━━━\n`;
 
-        let claves = Object.keys(guarData);
+        let claves = Object.keys(case);
         
         if (claves.length === 0) {
             listaMensaje += "🚫 *No hay palabras clave guardadas.*\n";
@@ -615,8 +615,7 @@ case 'tovideo': {
 
   break;
 }
-      
-case 'tourl': {
+   case 'tourl': {
     const fs = require('fs');
     const path = require('path');
     const FormData = require('form-data');
@@ -638,6 +637,9 @@ case 'tourl': {
 
     await m.react('☁️');
 
+    let rawPath = null;
+    let finalPath = null;
+
     try {
         let typeDetected = null;
         let mediaMessage = null;
@@ -655,37 +657,60 @@ case 'tourl': {
             typeDetected = 'audio';
             mediaMessage = quotedMsg.audioMessage;
         } else {
-            throw new Error("❌ Solo se permiten imágenes, videos, stickers, audios o notas de voz.");
+            throw new Error('❌ Solo se permiten imágenes, videos, stickers, audios o notas de voz.');
         }
 
         const tmpDir = path.join(__dirname, 'tmp');
-        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
+        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
 
-        const rawExt = typeDetected === 'sticker' ? 'webp' :
-            mediaMessage.mimetype ? mediaMessage.mimetype.split('/')[1].split(';')[0] : 'bin';
+        const originalMime =
+            typeDetected === 'sticker'
+                ? 'image/webp'
+                : (mediaMessage.mimetype || 'application/octet-stream');
 
-        const rawPath = path.join(tmpDir, `${Date.now()}_input.${rawExt}`);
-        const stream = await downloadContentFromMessage(mediaMessage, typeDetected === 'sticker' ? 'sticker' : typeDetected);
+        const rawExt =
+            typeDetected === 'sticker'
+                ? 'webp'
+                : (originalMime.split('/')[1]?.split(';')[0] || 'bin');
+
+        rawPath = path.join(tmpDir, `${Date.now()}_input.${rawExt}`);
+
+        const stream = await downloadContentFromMessage(
+            mediaMessage,
+            typeDetected === 'sticker' ? 'sticker' : typeDetected
+        );
+
         const writeStream = fs.createWriteStream(rawPath);
         for await (const chunk of stream) {
             writeStream.write(chunk);
         }
         writeStream.end();
 
-        await new Promise(resolve => writeStream.on('finish', resolve));
+        await new Promise((resolve, reject) => {
+            writeStream.on('finish', resolve);
+            writeStream.on('error', reject);
+        });
 
         const stats = fs.statSync(rawPath);
         const maxSize = 200 * 1024 * 1024;
+
         if (stats.size > maxSize) {
             fs.unlinkSync(rawPath);
+            rawPath = null;
             throw new Error('⚠️ El archivo excede el límite de 200MB.');
         }
 
-        let finalPath = rawPath;
+        finalPath = rawPath;
+        let finalMime = originalMime;
+        let finalName = path.basename(finalPath);
 
-        const isAudioToConvert = typeDetected === 'audio' && (rawExt === 'ogg' || rawExt === 'm4a' || rawExt === 'mpeg');
+        const isAudioToConvert =
+            typeDetected === 'audio' &&
+            ['ogg', 'm4a', 'mpeg'].includes(rawExt);
+
         if (isAudioToConvert) {
             finalPath = path.join(tmpDir, `${Date.now()}_converted.mp3`);
+
             await new Promise((resolve, reject) => {
                 ffmpeg(rawPath)
                     .audioCodec('libmp3lame')
@@ -694,30 +719,113 @@ case 'tourl': {
                     .on('error', reject)
                     .save(finalPath);
             });
-            fs.unlinkSync(rawPath);
+
+            if (fs.existsSync(rawPath)) {
+                fs.unlinkSync(rawPath);
+                rawPath = null;
+            }
+
+            finalMime = 'audio/mpeg';
+            finalName = path.basename(finalPath);
         }
 
-        const form = new FormData();
-        form.append('file', fs.createReadStream(finalPath));
+        const uploadToRussell = async (filePath) => {
+            const form = new FormData();
+            form.append('file', fs.createReadStream(filePath));
 
-        const res = await axios.post('https://cdn.russellxz.click/upload.php', form, {
-            headers: form.getHeaders()
-        });
+            const res = await axios.post('https://cdn.russellxz.click/upload.php', form, {
+                headers: form.getHeaders()
+            });
 
-        fs.unlinkSync(finalPath);
+            if (!res.data || !res.data.url) {
+                throw new Error('No se pudo subir a CDN Russell.');
+            }
 
-        if (!res.data || !res.data.url) throw new Error('❌ No se pudo subir el archivo.');
+            return res.data.url;
+        };
 
-        await m.reply(`✅ *Archivo subido exitosamente:*\n${res.data.url}`);
+        const uploadToAdoFiles = async (filePath, filename, mimetype) => {
+            const base64 = fs.readFileSync(filePath, { encoding: 'base64' });
+
+            const payload = {
+                filename,
+                data: base64,
+                mimetype,
+                expiration: 'never'
+            };
+
+            const res = await axios.post('https://cdn.adoolab.xyz/api/upload', payload, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!res.data || !res.data.url) {
+                throw new Error('No se pudo subir a AdoFiles.');
+            }
+
+            return res.data.url;
+        };
+
+        const [russellRes, adoRes] = await Promise.allSettled([
+            uploadToRussell(finalPath),
+            uploadToAdoFiles(finalPath, finalName, finalMime)
+        ]);
+
+        const okRussell = russellRes.status === 'fulfilled' ? russellRes.value : null;
+        const okAdo = adoRes.status === 'fulfilled' ? adoRes.value : null;
+
+        if (!okRussell && !okAdo) {
+            const err1 = russellRes.status === 'rejected' ? russellRes.reason?.message : '';
+            const err2 = adoRes.status === 'rejected' ? adoRes.reason?.message : '';
+            throw new Error(`Fallaron ambos servicios.
+- RussellCDN: ${err1}
+- AdoFiles: ${err2}`);
+        }
+
+        let replyText = '✅ *Archivo subido exitosamente:*
+
+';
+
+        if (okRussell) {
+            replyText += `*'24h':*
+${okRussell}
+
+`;
+        }
+
+        if (okAdo) {
+            replyText += `*AdoFiles:*
+${okAdo}
+
+`;
+        }
+
+        if (!okRussell && russellRes.status === 'rejected') {
+            replyText += `*CDNRussell Failed:* ${russellRes.reason?.message}
+`;
+        }
+
+        if (!okAdo && adoRes.status === 'rejected') {
+            replyText += `*AdoFiles Failed:* ${adoRes.reason?.message}
+`;
+        }
+
+        await m.reply(replyText.trim());
         await m.react('✅');
 
     } catch (err) {
         await m.reply(`❌ *Error:* ${err.message}`);
         await m.react('❌');
+    } finally {
+        try {
+            if (rawPath && fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
+            if (finalPath && finalPath !== rawPath && fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+        } catch {}
     }
 
     break;
-              }
+}
 
         
 case 'carga': {

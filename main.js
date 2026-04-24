@@ -615,7 +615,7 @@ case 'tovideo': {
 
   break;
 }
-   case 'tourl': {
+case 'tourl': {
     const fs = require('fs');
     const path = require('path');
     const FormData = require('form-data');
@@ -788,7 +788,7 @@ case 'tovideo': {
 ';
 
         if (okRussell) {
-            replyText += `*'24h':*
+            replyText += `*CDN Russell:*
 ${okRussell}
 
 `;
@@ -802,7 +802,7 @@ ${okAdo}
         }
 
         if (!okRussell && russellRes.status === 'rejected') {
-            replyText += `*CDNRussell Failed:* ${russellRes.reason?.message}
+            replyText += `*CDN Russell Failed:* ${russellRes.reason?.message}
 `;
         }
 
@@ -826,8 +826,6 @@ ${okAdo}
 
     break;
 }
-
-        
 case 'carga': {
   if (!isOwner) {
     await sock.sendMessage(msg.key.remoteJid, {

@@ -14,7 +14,7 @@
   "license": "ISC",
   "engines": { "node": ">=18.17" },
   "dependencies": {
-    "@whiskeysockets/baileys": "github:thisAdo/Baileys",
+    "@whiskeysockets/baileys": "github:itsliaaa/baileys"
     "awesome-phonenumber": "^5.10.0",
     "axios": "^0.24.0",
     "cfonts": "^2.10.0",

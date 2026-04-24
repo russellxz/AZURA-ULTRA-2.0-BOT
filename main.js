@@ -295,7 +295,7 @@ Usa el comando:
 📂 *Lista de palabras clave guardadas:*  
 ━━━━━━━━━━━━━━━━━━━\n`;
 
-        let claves = Object.keys(case);
+        let claves = Object.keys(guarData);
         
         if (claves.length === 0) {
             listaMensaje += "🚫 *No hay palabras clave guardadas.*\n";
@@ -475,7 +475,217 @@ case "modoadmins": {
   }
   break;
 }
+case 'tourl': {
+    const fs = require('fs');
+    const path = require('path');
+    const FormData = require('form-data');
+    const axios = require('axios');
+    const ffmpeg = require('fluent-ffmpeg');
+    const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
+    const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+
+    const m = {
+        reply: (text) => sock.sendMessage(msg.key.remoteJid, { text }, { quoted: msg }),
+        react: (emoji) => sock.sendMessage(msg.key.remoteJid, { react: { text: emoji, key: msg.key } })
+    };
+
+    if (!quotedMsg) {
+        await m.reply('⚠️ *Responde a una imagen, video, sticker, nota de voz o audio para subirlo.*');
+        break;
+    }
+
+    await m.react('☁️');
+
+    let rawPath = null;
+    let finalPath = null;
+
+    try {
+        let typeDetected = null;
+        let mediaMessage = null;
+
+        if (quotedMsg.imageMessage) {
+            typeDetected = 'image';
+            mediaMessage = quotedMsg.imageMessage;
+        } else if (quotedMsg.videoMessage) {
+            typeDetected = 'video';
+            mediaMessage = quotedMsg.videoMessage;
+        } else if (quotedMsg.stickerMessage) {
+            typeDetected = 'sticker';
+            mediaMessage = quotedMsg.stickerMessage;
+        } else if (quotedMsg.audioMessage) {
+            typeDetected = 'audio';
+            mediaMessage = quotedMsg.audioMessage;
+        } else {
+            throw new Error('❌ Solo se permiten imágenes, videos, stickers, audios o notas de voz.');
+        }
+
+        const tmpDir = path.join(__dirname, 'tmp');
+        if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+
+        const originalMime =
+            typeDetected === 'sticker'
+                ? 'image/webp'
+                : (mediaMessage.mimetype || 'application/octet-stream');
+
+        const rawExt =
+            typeDetected === 'sticker'
+                ? 'webp'
+                : (originalMime.split('/')[1]?.split(';')[0] || 'bin');
+
+        rawPath = path.join(tmpDir, `${Date.now()}_input.${rawExt}`);
+
+        const stream = await downloadContentFromMessage(
+            mediaMessage,
+            typeDetected === 'sticker' ? 'sticker' : typeDetected
+        );
+
+        const writeStream = fs.createWriteStream(rawPath);
+        for await (const chunk of stream) {
+            writeStream.write(chunk);
+        }
+        writeStream.end();
+
+        await new Promise((resolve, reject) => {
+            writeStream.on('finish', resolve);
+            writeStream.on('error', reject);
+        });
+
+        const stats = fs.statSync(rawPath);
+        const maxSize = 200 * 1024 * 1024;
+
+        if (stats.size > maxSize) {
+            fs.unlinkSync(rawPath);
+            rawPath = null;
+            throw new Error('⚠️ El archivo excede el límite de 200MB.');
+        }
+
+        finalPath = rawPath;
+        let finalMime = originalMime;
+        let finalName = path.basename(finalPath);
+
+        const isAudioToConvert =
+            typeDetected === 'audio' &&
+            ['ogg', 'm4a', 'mpeg'].includes(rawExt);
+
+        if (isAudioToConvert) {
+            finalPath = path.join(tmpDir, `${Date.now()}_converted.mp3`);
+
+            await new Promise((resolve, reject) => {
+                ffmpeg(rawPath)
+                    .audioCodec('libmp3lame')
+                    .toFormat('mp3')
+                    .on('end', resolve)
+                    .on('error', reject)
+                    .save(finalPath);
+            });
+
+            if (fs.existsSync(rawPath)) {
+                fs.unlinkSync(rawPath);
+                rawPath = null;
+            }
+
+            finalMime = 'audio/mpeg';
+            finalName = path.basename(finalPath);
+        }
+
+        const uploadToRussell = async (filePath) => {
+            const form = new FormData();
+            form.append('file', fs.createReadStream(filePath));
+
+            const res = await axios.post('https://cdn.russellxz.click/upload.php', form, {
+                headers: form.getHeaders()
+            });
+
+            if (!res.data || !res.data.url) {
+                throw new Error('No se pudo subir a CDN Russell.');
+            }
+
+            return res.data.url;
+        };
+
+        const uploadToAdoFiles = async (filePath, filename, mimetype) => {
+            const base64 = fs.readFileSync(filePath, { encoding: 'base64' });
+
+            const payload = {
+                filename,
+                data: base64,
+                mimetype,
+                expiration: 'never'
+            };
+
+            const res = await axios.post('https://cdn.adoolab.xyz/api/upload', payload, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!res.data || !res.data.url) {
+                throw new Error('No se pudo subir a AdoFiles.');
+            }
+
+            return res.data.url;
+        };
+
+        const [russellRes, adoRes] = await Promise.allSettled([
+            uploadToRussell(finalPath),
+            uploadToAdoFiles(finalPath, finalName, finalMime)
+        ]);
+
+        const okRussell = russellRes.status === 'fulfilled' ? russellRes.value : null;
+        const okAdo = adoRes.status === 'fulfilled' ? adoRes.value : null;
+
+        if (!okRussell && !okAdo) {
+            const err1 = russellRes.status === 'rejected' ? russellRes.reason?.message : '';
+            const err2 = adoRes.status === 'rejected' ? adoRes.reason?.message : '';
+            throw new Error(`Fallaron ambos servicios.
+- RussellCDN: ${err1}
+- AdoFiles: ${err2}`);
+        }
+
+        let replyText = '✅ *Archivo subido exitosamente:*
+
+';
+
+        if (okRussell) {
+            replyText += `*CDN Russell:*
+${okRussell}
+
+`;
+        }
+
+        if (okAdo) {
+            replyText += `*AdoFiles:*
+${okAdo}
+
+`;
+        }
+
+        if (!okRussell && russellRes.status === 'rejected') {
+            replyText += `*CDN Russell Failed:* ${russellRes.reason?.message}
+`;
+        }
+
+        if (!okAdo && adoRes.status === 'rejected') {
+            replyText += `*AdoFiles Failed:* ${adoRes.reason?.message}
+`;
+        }
+
+        await m.reply(replyText.trim());
+        await m.react('✅');
+
+    } catch (err) {
+        await m.reply(`❌ *Error:* ${err.message}`);
+        await m.react('❌');
+    } finally {
+        try {
+            if (rawPath && fs.existsSync(rawPath)) fs.unlinkSync(rawPath);
+            if (finalPath && finalPath !== rawPath && fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+        } catch {}
+    }
+
+    break;
+}
       
 case "modoprivado": {
   try {
